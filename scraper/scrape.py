@@ -207,6 +207,39 @@ def format_phone(phone: str) -> str:
     return digits
 
 
+PRICE_BUCKET_RE = re.compile(r"([\d.,]+)\s*(сая|Тэрбум)")
+
+
+def price_bucket(price_str: str) -> str:
+    """
+    Үнийг сая ₮-ээр тооцож, доорх бүлгүүдийн аль нэгэнд оноож өгнө:
+    0-200 / 200-300 / 300-400 / 400-500 / 500-1000 / 1000+
+    (1000 сая = 1 тэрбум). Тоо ялгаж чадахгүй бол хоосон буцаана.
+    """
+    if not price_str:
+        return ""
+    m = PRICE_BUCKET_RE.search(price_str)
+    if not m:
+        return ""
+    try:
+        num = float(m.group(1).replace(",", "."))
+    except ValueError:
+        return ""
+    million = num * 1000 if m.group(2) == "Тэрбум" else num
+
+    if million <= 200:
+        return "0-200"
+    if million <= 300:
+        return "200-300"
+    if million <= 400:
+        return "300-400"
+    if million <= 500:
+        return "400-500"
+    if million <= 1000:
+        return "500-1000"
+    return "1000+"
+
+
 def build_html_block(new_listings: list[dict]) -> str:
     """Нэг өдрийн шинэ зарыг карт хэлбэрийн grid болгож үзүүлнэ."""
     now = datetime.now()
@@ -251,8 +284,10 @@ def build_html_block(new_listings: list[dict]) -> str:
         else:
             phone_html = '<span class="card__phone card__phone--missing">Утас олдсонгүй</span>'
 
+        price_attr = price_bucket(l.get("price") or "")
+
         cards.append(
-            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}">
+            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}" data-price="{price_attr}">
         <a class="card__title" href="{l["url"]}" target="_blank" rel="noopener">{title}</a>
         {specs_html}
         <div class="card__row">
@@ -417,7 +452,7 @@ PAGE_SHELL = """<!DOCTYPE html>
 
   .filterbar{
     position:relative;margin-top:16px;
-    display:flex;align-items:center;gap:8px;
+    display:flex;flex-wrap:wrap;align-items:center;gap:8px;
   }
   .filterbar select{
     appearance:none;-webkit-appearance:none;
@@ -426,7 +461,7 @@ PAGE_SHELL = """<!DOCTYPE html>
     background:var(--white) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M0 0L5 6L10 0Z" fill="%23081C2D"/></svg>') no-repeat right 12px center;
     border:1px solid #D8DCDF;border-radius:8px;
     padding:9px 30px 9px 12px;
-    flex:1;
+    flex:1 1 140px;
     min-width:0;
   }
 
@@ -482,6 +517,15 @@ PAGE_SHELL = """<!DOCTYPE html>
         <option value="4">4 өрөө</option>
         <option value="5+">5+ өрөө</option>
       </select>
+      <select id="priceFilter" onchange="filterListings()">
+        <option value="">Бүх үнэ</option>
+        <option value="0-200">200 сая хүртэл</option>
+        <option value="200-300">200-300 сая</option>
+        <option value="300-400">300-400 сая</option>
+        <option value="400-500">400-500 сая</option>
+        <option value="500-1000">500 сая - 1 тэрбум</option>
+        <option value="1000+">1 тэрбумаас дээш</option>
+      </select>
     </div>
   </div>
 </header>
@@ -493,10 +537,12 @@ PAGE_SHELL = """<!DOCTYPE html>
 function filterListings(){
   var loc = document.getElementById('locationFilter').value;
   var rooms = document.getElementById('roomsFilter').value;
+  var price = document.getElementById('priceFilter').value;
   document.querySelectorAll('.card').forEach(function(card){
     var locMatch = !loc || card.getAttribute('data-location') === loc;
     var roomsMatch = !rooms || card.getAttribute('data-rooms') === rooms;
-    card.style.display = (locMatch && roomsMatch) ? '' : 'none';
+    var priceMatch = !price || card.getAttribute('data-price') === price;
+    card.style.display = (locMatch && roomsMatch && priceMatch) ? '' : 'none';
   });
   document.querySelectorAll('.day').forEach(function(day){
     var cards = day.querySelectorAll('.card');
