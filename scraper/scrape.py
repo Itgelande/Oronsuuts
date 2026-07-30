@@ -86,19 +86,27 @@ def extract_location(a_tag):
     return None
 
 
-def load_seen() -> set:
+def load_seen() -> dict:
+    """
+    seen_ids.json-г уншина. Хуучин форматтай (зөвхөн ID-н жагсаалт) файл
+    байвал шинэ формат (ID -> нийтлэгдсэн огноо) руу автоматаар хөрвүүлнэ.
+    """
     if DATA_FILE.exists():
         try:
-            return set(json.loads(DATA_FILE.read_text(encoding="utf-8")))
+            data = json.loads(DATA_FILE.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
-            return set()
-    return set()
+            return {}
+        if isinstance(data, list):
+            return {ad_id: None for ad_id in data}
+        if isinstance(data, dict):
+            return data
+    return {}
 
 
-def save_seen(seen_ids: set) -> None:
+def save_seen(seen: dict) -> None:
     DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
     DATA_FILE.write_text(
-        json.dumps(sorted(seen_ids), ensure_ascii=False, indent=0),
+        json.dumps(seen, ensure_ascii=False, indent=0, sort_keys=True),
         encoding="utf-8",
     )
 
@@ -116,6 +124,7 @@ FLOOR_RE = re.compile(r"Хэдэн давхарт[:\s]+(\d+)")
 TOTAL_FLOORS_RE = re.compile(r"Барилгын давхар[:\s]+(\d+)")
 FULL_LOCATION_RE = re.compile(r"Байршил[:\s]+([^\n]+)")
 ROOMS_RE = re.compile(r"(\d+)\s*өрөө")
+PUBLISHED_RE = re.compile(r"Нийтэлсэн:\s*([\d]{4}-[\d]{2}-[\d]{2}\s+[\d]{2}:[\d]{2})")
 
 
 def fetch_detail(url: str) -> dict:
@@ -150,6 +159,10 @@ def fetch_detail(url: str) -> dict:
     total_floors_m = TOTAL_FLOORS_RE.search(text)
     if total_floors_m:
         details["total_floors"] = total_floors_m.group(1)
+
+    published_m = PUBLISHED_RE.search(text)
+    if published_m:
+        details["published"] = published_m.group(1)
 
     loc_m = FULL_LOCATION_RE.search(text)
     if loc_m:
@@ -322,6 +335,9 @@ def build_html_block(new_listings: list[dict]) -> str:
         pps = price_per_sqm(l.get("price") or "", l.get("area") or "")
         if pps:
             spec_parts.append(escape(pps))
+        if l.get("published"):
+            pub_date = l["published"].split(" ")[0]  # зөвхөн огноог нь авна (цагийг нь хасна)
+            spec_parts.append(f"🗓 {escape(pub_date)}")
         specs_html = (
             f'<span class="card__specs">{" · ".join(spec_parts)}</span>'
             if spec_parts else ""
@@ -696,7 +712,14 @@ def main() -> None:
     skipped_aimag += len(ub_candidates) - len(display_listings)
 
     for l in all_listings:
-        seen.add(l["id"])
+        if l["id"] not in seen:
+            seen[l["id"]] = None
+
+    # Дэлгэрэнгүй хуудаснаас олдсон нийтлэгдсэн бодит огноог seen сан руу бичнэ
+    for l in ub_candidates[:MAX_DETAIL_FETCHES]:
+        if l.get("published"):
+            seen[l["id"]] = l["published"]
+
     save_seen(seen)
 
     block = build_html_block(display_listings)

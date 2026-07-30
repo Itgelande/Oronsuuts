@@ -16,8 +16,10 @@ from scrape import (
     escape,
     fetch_detail,
     format_phone,
+    load_seen,
     price_bucket,
     price_per_sqm,
+    save_seen,
 )
 
 OUTPUT_HTML = Path(__file__).resolve().parent.parent / "docs" / "index.html"
@@ -62,6 +64,9 @@ def build_card(url: str, title: str, price: str, location: str, rooms: str, deta
     pps = price_per_sqm(price, details.get("area") or "")
     if pps:
         spec_parts.append(escape(pps))
+    if details.get("published"):
+        pub_date = details["published"].split(" ")[0]
+        spec_parts.append(f"🗓 {escape(pub_date)}")
     specs_html = (
         f'<span class="card__specs">{" · ".join(spec_parts)}</span>' if spec_parts else ""
     )
@@ -98,8 +103,14 @@ def build_card(url: str, title: str, price: str, location: str, rooms: str, deta
     )
 
 
+import re as _re
+
+AD_ID_RE = _re.compile(r"/adv/(\d+)_")
+
+
 def main() -> None:
     html = OUTPUT_HTML.read_text(encoding="utf-8")
+    seen = load_seen()
 
     matches = list(CARD_RE.finditer(html))
     print(f"Нийт олдсон карт: {len(matches)}")
@@ -126,6 +137,10 @@ def main() -> None:
             if details.get("phone"):
                 success += 1
 
+        id_m = AD_ID_RE.search(url)
+        if id_m and details.get("published"):
+            seen[id_m.group(1)] = details["published"]
+
         new_card = build_card(
             url=url,
             title=m.group("title"),
@@ -143,8 +158,9 @@ def main() -> None:
         time.sleep(REQUEST_DELAY_SEC)
 
     OUTPUT_HTML.write_text(updated_html, encoding="utf-8")
+    save_seen(seen)
     print(f"Утас олдсон: {success}, амжилтгүй: {failed}")
-    print("docs/index.html шинэчлэгдлээ")
+    print("docs/index.html болон data/seen_ids.json шинэчлэгдлээ")
 
 
 if __name__ == "__main__":
