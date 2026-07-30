@@ -558,9 +558,20 @@ PAGE_SHELL = """<!DOCTYPE html>
   }
 
   .filterbar{
-    position:relative;margin-top:16px;
+    position:relative;margin-top:10px;
     display:flex;flex-wrap:wrap;align-items:center;gap:8px;
   }
+  .searchbar{margin-top:16px;}
+  .searchbar input{
+    width:100%;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:13px;color:var(--navy);
+    background:var(--white);
+    border:1px solid #D8DCDF;border-radius:8px;
+    padding:10px 12px;
+  }
+  .searchbar input::placeholder{color:var(--gray);}
+  .searchbar input:focus{outline:2px solid var(--emerald);outline-offset:1px;}
   .filterbar select{
     appearance:none;-webkit-appearance:none;
     font-family:'IBM Plex Mono',monospace;
@@ -608,6 +619,9 @@ PAGE_SHELL = """<!DOCTYPE html>
     <p class="eyebrow">unegui.mn · орон сууц зарна</p>
     <h1>Шинэ байр</h1>
     <p class="meta">Өдөр бүр автоматаар шалгаж, шинэ зарыг доор нэмнэ</p>
+    <div class="searchbar">
+      <input type="tel" id="phoneSearch" placeholder="Утасны дугаараар хайх..." oninput="filterListings()" inputmode="numeric">
+    </div>
     <div class="filterbar">
       <select id="locationFilter" onchange="filterListings()">
         <option value="">Бүх дүүрэг</option>
@@ -704,12 +718,14 @@ function filterListings(){
   var rooms = document.getElementById('roomsFilter').value;
   var price = document.getElementById('priceFilter').value;
   var dateSel = document.getElementById('dateFilter').value;
+  var phoneQuery = document.getElementById('phoneSearch').value.replace(/\\D/g, '');
   document.querySelectorAll('.card').forEach(function(card){
     var locMatch = !loc || card.getAttribute('data-location') === loc;
     var roomsMatch = !rooms || card.getAttribute('data-rooms') === rooms;
     var priceMatch = !price || card.getAttribute('data-price') === price;
     var dateMatch = !dateSel || dateBucket(daysAgo(card.getAttribute('data-published'))) === dateSel;
-    card.style.display = (locMatch && roomsMatch && priceMatch && dateMatch) ? '' : 'none';
+    var phoneMatch = !phoneQuery || (card.getAttribute('data-phone') || '').indexOf(phoneQuery) !== -1;
+    card.style.display = (locMatch && roomsMatch && priceMatch && dateMatch && phoneMatch) ? '' : 'none';
   });
   document.querySelectorAll('.day').forEach(function(day){
     var cards = day.querySelectorAll('.card');
