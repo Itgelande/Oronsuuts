@@ -460,21 +460,10 @@ PAGE_SHELL = """<!DOCTYPE html>
     <p class="meta">Өдөр бүр автоматаар шалгаж, шинэ зарыг доор нэмнэ</p>
     <div class="filterbar">
       <select id="locationFilter" onchange="filterByLocation(this.value)">
-        <option value="">Бүх дүүрэг / аймаг</option>
-        <optgroup label="Улаанбаатар">
-          <option>Багануур</option><option>Багахангай</option><option>Баянгол</option>
-          <option>Баянзүрх</option><option>Налайх</option><option>Сонгинохайрхан</option>
-          <option>Сүхбаатар</option><option>Хан-Уул</option><option>Чингэлтэй</option>
-        </optgroup>
-        <optgroup label="Аймаг">
-          <option>Архангай</option><option>Баян-Өлгий</option><option>Баянхонгор</option>
-          <option>Булган</option><option>Говь-Алтай</option><option>Говьсүмбэр</option>
-          <option>Дархан-Уул</option><option>Дорноговь</option><option>Дорнод</option>
-          <option>Дундговь</option><option>Завхан</option><option>Орхон</option>
-          <option>Өвөрхангай</option><option>Өмнөговь</option><option>Сэлэнгэ</option>
-          <option>Төв</option><option>Увс</option><option>Ховд</option>
-          <option>Хөвсгөл</option><option>Хэнтий</option>
-        </optgroup>
+        <option value="">Бүх дүүрэг</option>
+        <option>Багануур</option><option>Багахангай</option><option>Баянгол</option>
+        <option>Баянзүрх</option><option>Налайх</option><option>Сонгинохайрхан</option>
+        <option>Сүхбаатар</option><option>Хан-Уул</option><option>Чингэлтэй</option>
         <option value="Бусад">Байршил тодорхойгүй</option>
       </select>
     </div>
@@ -548,22 +537,35 @@ def main() -> None:
             # Энэ хуудсанд шинэ зар олдоогүй тул цаашид ч байхгүй гэж үзнэ
             break
 
-    # Зөвхөн шинэ зар бүрийн дэлгэрэнгүй мэдээллийг (утас, талбай, давхар, өрөө,
-    # нарийвчилсан байршил) татна — хуучин зарыг дахин татахгүй
-    for i, l in enumerate(new_listings[:MAX_DETAIL_FETCHES]):
+    # Улаанбаатар биш (аймгийн) зарыг эрт шүүж хасна — дэлгэрэнгүй хуудсыг ч
+    # дэмий татахгүй байх зорилготой. location тодорхойгүй (None) зар цаашид
+    # дэлгэрэнгүй хуудаснаас дахин шалгагдана.
+    ub_candidates = [l for l in new_listings if l.get("location") not in AIMAGS]
+    skipped_aimag = len(new_listings) - len(ub_candidates)
+
+    # Зөвхөн Улаанбаатар байж болзошгүй шинэ зарын дэлгэрэнгүй мэдээллийг
+    # (утас, талбай, давхар, өрөө, нарийвчилсан байршил) татна
+    for l in ub_candidates[:MAX_DETAIL_FETCHES]:
         details = fetch_detail(l["url"])
         l.update(details)
         time.sleep(REQUEST_DELAY_SEC)
+
+    # Дэлгэрэнгүй хуудаснаас олсон нарийвчилсан байршлаар дахин шалгаж,
+    # бодитоор аймагт байгаа нь илэрвэл эцсийн жагсаалтаас хасна
+    display_listings = [l for l in ub_candidates if l.get("location") not in AIMAGS]
+    skipped_aimag += len(ub_candidates) - len(display_listings)
 
     for l in all_listings:
         seen.add(l["id"])
     save_seen(seen)
 
-    block = build_html_block(new_listings)
+    block = build_html_block(display_listings)
     update_output_html(block)
 
     print(f"Нийт шалгасан зар: {len(all_listings)}")
-    print(f"Шинэ зар: {len(new_listings)}")
+    print(f"Шинэ зар (нийт): {len(new_listings)}")
+    print(f"Аймгийн зар учир хасагдсан: {skipped_aimag}")
+    print(f"Улаанбаатарын шинэ зар (харуулсан): {len(display_listings)}")
 
 
 if __name__ == "__main__":
