@@ -36,6 +36,20 @@ HEADERS = {
 PRICE_RE = re.compile(r"^[\d.,]+\s*(сая|Тэрбум)\s*₮")
 AD_HREF_RE = re.compile(r"^/adv/(\d+)_")
 
+PRICE_SPLIT_RE = re.compile(r"[\d.,]+\s*(?:сая|Тэрбум)\s*₮")
+
+
+def clean_price(text: str) -> str:
+    """
+    Хямдралтай зарууд заримдаа хуучин ба шинэ үнийг зайгүй наалдуулж
+    харуулдаг (жишээ нь "139 сая₮145 сая₮"). Ийм тохиолдолд СҮҮЛИЙН
+    (одоогийн, хямдруулсан) үнийг л авна.
+    """
+    matches = PRICE_SPLIT_RE.findall(text)
+    if len(matches) > 1:
+        return matches[-1]
+    return text
+
 UB_DUUREGS = [
     "Багануур", "Багахангай", "Баянгол", "Баянзүрх", "Налайх",
     "Сонгинохайрхан", "Сүхбаатар", "Хан-Уул", "Чингэлтэй",
@@ -185,7 +199,7 @@ def parse_listings(html: str) -> list[dict]:
             continue
 
         if PRICE_RE.match(text):
-            listings[ad_id]["price"] = text
+            listings[ad_id]["price"] = clean_price(text)
         else:
             current = listings[ad_id]["title"]
             if current is None or len(text) > len(current):
@@ -214,18 +228,20 @@ def price_bucket(price_str: str) -> str:
     """
     Үнийг сая ₮-ээр тооцож, доорх бүлгүүдийн аль нэгэнд оноож өгнө:
     0-200 / 200-300 / 300-400 / 400-500 / 500-1000 / 1000+
-    (1000 сая = 1 тэрбум). Тоо ялгаж чадахгүй бол хоосон буцаана.
+    (1000 сая = 1 тэрбум). Хэрэв текст дотор хэд хэдэн үнэ агуулагдвал
+    СҮҮЛИЙН (одоогийн) үнийг ашиглана. Тоо ялгаж чадахгүй бол хоосон буцаана.
     """
     if not price_str:
         return ""
-    m = PRICE_BUCKET_RE.search(price_str)
-    if not m:
+    matches = PRICE_BUCKET_RE.findall(price_str)
+    if not matches:
         return ""
+    num_str, unit = matches[-1]
     try:
-        num = float(m.group(1).replace(",", "."))
+        num = float(num_str.replace(",", "."))
     except ValueError:
         return ""
-    million = num * 1000 if m.group(2) == "Тэрбум" else num
+    million = num * 1000 if unit == "Тэрбум" else num
 
     if million <= 200:
         return "0-200"
@@ -238,6 +254,39 @@ def price_bucket(price_str: str) -> str:
     if million <= 1000:
         return "500-1000"
     return "1000+"
+
+
+AREA_NUM_RE = re.compile(r"([\d.,]+)")
+
+
+def price_per_sqm(price_str: str, area_str: str) -> str:
+    """
+    Нийт үнэ ба талбайгаас 1 м²-ийн үнийг тооцоолж, "X.XX сая/м²" эсвэл
+    том дүн бол "X сая/м²" хэлбэрээр буцаана. Тооцох боломжгүй бол хоосон.
+    """
+    if not price_str or not area_str:
+        return ""
+    price_matches = PRICE_BUCKET_RE.findall(price_str)
+    if not price_matches:
+        return ""
+    num_str, unit = price_matches[-1]
+    try:
+        total_million = float(num_str.replace(",", ".")) * (1000 if unit == "Тэрбум" else 1)
+    except ValueError:
+        return ""
+
+    area_m = AREA_NUM_RE.search(area_str)
+    if not area_m:
+        return ""
+    try:
+        area_val = float(area_m.group(1).replace(",", "."))
+    except ValueError:
+        return ""
+    if area_val <= 0:
+        return ""
+
+    per_sqm = total_million / area_val
+    return f"{per_sqm:.2f} сая/м²"
 
 
 def build_html_block(new_listings: list[dict]) -> str:
@@ -270,6 +319,9 @@ def build_html_block(new_listings: list[dict]) -> str:
             spec_parts.append(f'{escape(l["floor"])}/{escape(l["total_floors"])} давхар')
         elif l.get("total_floors"):
             spec_parts.append(f'{escape(l["total_floors"])} давхартай')
+        pps = price_per_sqm(l.get("price") or "", l.get("area") or "")
+        if pps:
+            spec_parts.append(escape(pps))
         specs_html = (
             f'<span class="card__specs">{" · ".join(spec_parts)}</span>'
             if spec_parts else ""
@@ -286,8 +338,16 @@ def build_html_block(new_listings: list[dict]) -> str:
 
         price_attr = price_bucket(l.get("price") or "")
 
+        link_icon = (
+            f'<a class="card__go" href="{l["url"]}" target="_blank" rel="noopener" aria-label="Зарыг үзэх">'
+            '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+            'stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round">'
+            '<path d="M7 17L17 7M9 7h8v8"/></svg></a>'
+        )
+
         cards.append(
             f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}" data-price="{price_attr}">
+        {link_icon}
         <a class="card__title" href="{l["url"]}" target="_blank" rel="noopener">{title}</a>
         {specs_html}
         <div class="card__row">
@@ -393,20 +453,34 @@ PAGE_SHELL = """<!DOCTYPE html>
   @media (min-width:560px){.grid{grid-template-columns:1fr 1fr;}}
 
   .card{
+    position:relative;
     display:flex;flex-direction:column;gap:7px;
     background:#fff;
     border:1px solid #E4E7EA;
     border-left:3px solid var(--emerald);
     border-radius:10px;
-    padding:13px 14px;
+    padding:13px 44px 13px 14px;
     transition:transform .12s ease, box-shadow .12s ease;
   }
   .card:active{transform:scale(.98);}
   @media (hover:hover){
     .card:hover{box-shadow:0 4px 14px rgba(8,28,45,.08);transform:translateY(-1px);}
   }
+  .card__go{
+    position:absolute;top:11px;right:11px;
+    width:30px;height:30px;border-radius:50%;
+    display:flex;align-items:center;justify-content:center;
+    background:var(--emerald);color:#fff;
+    box-shadow:0 2px 6px rgba(31,122,99,.35);
+    transition:transform .15s ease, background .15s ease;
+  }
+  .card__go:active{transform:scale(.88);}
+  @media (hover:hover){
+    .card__go:hover{background:var(--navy);transform:scale(1.1);}
+  }
   .card__title{
     display:block;
+    padding-right:4px;
     font-size:14.5px;font-weight:500;line-height:1.35;color:var(--navy);
   }
   .card__specs{
