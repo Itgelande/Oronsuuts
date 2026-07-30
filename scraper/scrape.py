@@ -19,8 +19,8 @@ import requests
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.unegui.mn/l-hdlh/l-hdlh-zarna/oron-suuts-zarna/"
-PAGES_TO_CHECK = 3          # эхний хэдэн хуудсыг шалгах вэ (VIP зарууд дээгүүр гардаг тул хэдэн хуудас шалгах нь чухал)
-REQUEST_DELAY_SEC = 2       # хуудас хооронд түр хүлээх (сайтад дарамт өгөхгүй байх үүднээс)
+MAX_PAGES = 20              # хамгийн ихдээ хэдэн хуудас шалгах вэ (аюулгүйн хязгаар)
+REQUEST_DELAY_SEC = 2       # хуудас/зар хооронд түр хүлээх (сайтад дарамт өгөхгүй байх үүднээс)
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "seen_ids.json"
 OUTPUT_HTML = Path(__file__).resolve().parent.parent / "docs" / "index.html"
@@ -96,6 +96,62 @@ def fetch_page(page_num: int) -> str:
     return resp.text
 
 
+TEL_RE = re.compile(r'href="tel:(\+?\d+)"')
+AREA_RE = re.compile(r"Талбай[:\s]+([\d.,]+)\s*м")
+FLOOR_RE = re.compile(r"Хэдэн давхарт[:\s]+(\d+)")
+TOTAL_FLOORS_RE = re.compile(r"Барилгын давхар[:\s]+(\d+)")
+FULL_LOCATION_RE = re.compile(r"Байршил[:\s]+([^\n]+)")
+ROOMS_RE = re.compile(r"(\d+)\s*өрөө")
+
+
+def fetch_detail(url: str) -> dict:
+    """
+    Зарын дэлгэрэнгүй хуудаснаас: утасны дугаар, талбай, давхар,
+    нийт давхрын тоо, өрөөний тоо, нарийвчилсан байршлыг татна.
+    """
+    details: dict = {}
+    try:
+        resp = requests.get(url, headers=HEADERS, timeout=25)
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"  Дэлгэрэнгүй хуудас татагдсангүй ({url}): {e}")
+        return details
+
+    html = resp.text
+    soup = BeautifulSoup(html, "html.parser")
+    text = soup.get_text("\n", strip=True)
+
+    tel_m = TEL_RE.search(html)
+    if tel_m:
+        details["phone"] = tel_m.group(1)
+
+    area_m = AREA_RE.search(text)
+    if area_m:
+        details["area"] = area_m.group(1).replace(",", ".") + " м²"
+
+    floor_m = FLOOR_RE.search(text)
+    if floor_m:
+        details["floor"] = floor_m.group(1)
+
+    total_floors_m = TOTAL_FLOORS_RE.search(text)
+    if total_floors_m:
+        details["total_floors"] = total_floors_m.group(1)
+
+    loc_m = FULL_LOCATION_RE.search(text)
+    if loc_m:
+        full_loc = loc_m.group(1).strip()
+        details["full_location"] = full_loc
+        district_m = LOCATION_RE.search(full_loc)
+        if district_m:
+            details["location"] = district_m.group(1)
+
+    rooms_m = ROOMS_RE.search(text)
+    if rooms_m:
+        details["rooms"] = rooms_m.group(1)
+
+    return details
+
+
 def parse_listings(html: str) -> list[dict]:
     """
     unegui.mn-ийн ад блок бүрт нэг URL руу очдог олон <a> tag байдаг
@@ -142,6 +198,15 @@ def escape(text: str) -> str:
     return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
+def format_phone(phone: str) -> str:
+    """+97688112233 -> 8811-2233 хэлбэрт харуулна (сүүлийн 8 оронг)."""
+    digits = re.sub(r"\D", "", phone)
+    digits = digits[-8:] if len(digits) >= 8 else digits
+    if len(digits) == 8:
+        return f"{digits[:4]}-{digits[4:]}"
+    return digits
+
+
 def build_html_block(new_listings: list[dict]) -> str:
     """Нэг өдрийн шинэ зарыг карт хэлбэрийн grid болгож үзүүлнэ."""
     now = datetime.now()
@@ -155,14 +220,40 @@ def build_html_block(new_listings: list[dict]) -> str:
         price = escape(l["price"] or "—")
         location = l.get("location") or "Бусад"
         loc_attr = escape(location)
+
+        spec_parts = []
+        if l.get("area"):
+            spec_parts.append(escape(l["area"]))
+        if l.get("rooms"):
+            spec_parts.append(f'{escape(l["rooms"])} өрөө')
+        if l.get("floor") and l.get("total_floors"):
+            spec_parts.append(f'{escape(l["floor"])}/{escape(l["total_floors"])} давхар')
+        elif l.get("total_floors"):
+            spec_parts.append(f'{escape(l["total_floors"])} давхартай')
+        specs_html = (
+            f'<span class="card__specs">{" · ".join(spec_parts)}</span>'
+            if spec_parts else ""
+        )
+
+        phone = l.get("phone")
+        if phone:
+            phone_html = (
+                f'<a class="card__phone" href="tel:{escape(phone)}">'
+                f'📞 {escape(format_phone(phone))}</a>'
+            )
+        else:
+            phone_html = '<span class="card__phone card__phone--missing">Утас олдсонгүй</span>'
+
         cards.append(
-            f'''      <a class="card" href="{l["url"]}" target="_blank" rel="noopener" data-location="{loc_attr}">
-        <span class="card__title">{title}</span>
-        <span class="card__row">
+            f'''      <div class="card" data-location="{loc_attr}">
+        <a class="card__title" href="{l["url"]}" target="_blank" rel="noopener">{title}</a>
+        {specs_html}
+        <div class="card__row">
           <span class="card__price">{price}</span>
           <span class="card__loc">{escape(location)}</span>
-        </span>
-      </a>'''
+        </div>
+        {phone_html}
+      </div>'''
         )
 
     if cards:
@@ -260,7 +351,7 @@ PAGE_SHELL = """<!DOCTYPE html>
   @media (min-width:560px){.grid{grid-template-columns:1fr 1fr;}}
 
   .card{
-    display:flex;flex-direction:column;gap:8px;
+    display:flex;flex-direction:column;gap:7px;
     background:#fff;
     border:1px solid #E4E7EA;
     border-left:3px solid var(--emerald);
@@ -273,7 +364,12 @@ PAGE_SHELL = """<!DOCTYPE html>
     .card:hover{box-shadow:0 4px 14px rgba(8,28,45,.08);transform:translateY(-1px);}
   }
   .card__title{
+    display:block;
     font-size:14.5px;font-weight:500;line-height:1.35;color:var(--navy);
+  }
+  .card__specs{
+    font-family:'IBM Plex Mono',monospace;
+    font-size:11.5px;color:var(--navy);opacity:.65;
   }
   .card__row{
     display:flex;align-items:center;justify-content:space-between;gap:8px;
@@ -289,6 +385,21 @@ PAGE_SHELL = """<!DOCTYPE html>
     font-family:'IBM Plex Mono',monospace;
     font-size:11px;color:var(--gray);
     white-space:nowrap;
+  }
+  .card__phone{
+    display:inline-flex;align-items:center;gap:5px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:12px;font-weight:500;
+    color:var(--navy);
+    background:var(--white);
+    border:1px solid #E4E7EA;
+    border-radius:6px;
+    padding:5px 9px;
+    width:fit-content;
+    margin-top:2px;
+  }
+  .card__phone--missing{
+    color:var(--gray);font-weight:400;border-style:dashed;
   }
 
   .empty{
@@ -407,20 +518,42 @@ def update_output_html(new_block: str) -> None:
     OUTPUT_HTML.write_text(existing, encoding="utf-8")
 
 
+MAX_DETAIL_FETCHES = 300  # нэг ажиллагаанд дэлгэрэнгүй хуудас хэдэн зарын татах дээд хязгаар
+
+
 def main() -> None:
     seen = load_seen()
     all_listings: list[dict] = []
+    new_listings: list[dict] = []
 
-    for page in range(1, PAGES_TO_CHECK + 1):
+    # Сүүлд хадгалсан зараас хойш орсон бүх зарыг олох хүртэл хуудсаар үргэлжлүүлж татна.
+    # Хуудас бүрд шинэ зар олдохгүй болмогц зогсооно (MAX_PAGES хүртэл аюулгүйн хязгаартай).
+    for page in range(1, MAX_PAGES + 1):
         try:
             html = fetch_page(page)
         except requests.RequestException as e:
             print(f"Хуудас {page}-г татаж чадсангүй: {e}")
-            continue
-        all_listings.extend(parse_listings(html))
+            break
+
+        page_listings = parse_listings(html)
+        all_listings.extend(page_listings)
+
+        page_new = [l for l in page_listings if l["id"] not in seen]
+        new_listings.extend(page_new)
+
+        print(f"Хуудас {page}: {len(page_listings)} зар, {len(page_new)} шинэ")
         time.sleep(REQUEST_DELAY_SEC)
 
-    new_listings = [l for l in all_listings if l["id"] not in seen]
+        if not page_new and page > 1:
+            # Энэ хуудсанд шинэ зар олдоогүй тул цаашид ч байхгүй гэж үзнэ
+            break
+
+    # Зөвхөн шинэ зар бүрийн дэлгэрэнгүй мэдээллийг (утас, талбай, давхар, өрөө,
+    # нарийвчилсан байршил) татна — хуучин зарыг дахин татахгүй
+    for i, l in enumerate(new_listings[:MAX_DETAIL_FETCHES]):
+        details = fetch_detail(l["url"])
+        l.update(details)
+        time.sleep(REQUEST_DELAY_SEC)
 
     for l in all_listings:
         seen.add(l["id"])
