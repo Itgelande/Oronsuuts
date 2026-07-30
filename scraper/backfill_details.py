@@ -28,7 +28,8 @@ MAX_BACKFILL = 400  # аюулгүйн хязгаар
 
 CARD_RE = re.compile(
     r'<div class="card" data-location="(?P<loc>[^"]*)" data-rooms="(?P<rooms>[^"]*)" '
-    r'data-price="(?P<pricebucket>[^"]*)"(?: data-published="(?P<pub>[^"]*)")?>\s*'
+    r'data-price="(?P<pricebucket>[^"]*)"(?: data-published="(?P<pub>[^"]*)")?'
+    r'(?: data-phone="[^"]*")?>\s*'
     r'<a class="card__go"[^>]*>.*?</a>\s*'
     r'<a class="card__title" href="(?P<url>[^"]+)"[^>]*>(?P<title>[^<]*)</a>\s*'
     r'(?:<span class="card__specs">(?P<specs>[^<]*)</span>\s*)?'
@@ -82,6 +83,7 @@ def build_card(url: str, title: str, price: str, location: str, rooms: str, deta
 
     price_attr = price_bucket(price)
     pub_attr = escape(details["published"].split(" ")[0]) if details.get("published") else ""
+    phone_attr = escape(re.sub(r"\D", "", phone)) if phone else ""
     link_icon = (
         f'<a class="card__go" href="{url}" target="_blank" rel="noopener" aria-label="Зарыг үзэх">'
         '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
@@ -91,7 +93,7 @@ def build_card(url: str, title: str, price: str, location: str, rooms: str, deta
 
     return (
         f'<div class="card" data-location="{escape(loc)}" data-rooms="{rooms_attr}" '
-        f'data-price="{price_attr}" data-published="{pub_attr}">\n'
+        f'data-price="{price_attr}" data-published="{pub_attr}" data-phone="{phone_attr}">\n'
         f"        {link_icon}\n"
         f'        <a class="card__title" href="{url}" target="_blank" rel="noopener">{escape(title)}</a>\n'
         f"        {specs_html}\n"

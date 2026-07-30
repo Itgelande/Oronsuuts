@@ -362,9 +362,10 @@ def build_html_block(new_listings: list[dict]) -> str:
         )
 
         pub_attr = escape(l["published"].split(" ")[0]) if l.get("published") else ""
+        phone_attr = escape(re.sub(r"\D", "", phone)) if phone else ""
 
         cards.append(
-            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}" data-price="{price_attr}" data-published="{pub_attr}">
+            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}" data-price="{price_attr}" data-published="{pub_attr}" data-phone="{phone_attr}">
         {link_icon}
         <a class="card__title" href="{l["url"]}" target="_blank" rel="noopener">{title}</a>
         {specs_html}
@@ -407,6 +408,8 @@ PAGE_SHELL = """<!DOCTYPE html>
     --emerald-tint:#E3F1EC;
     --white:#F5F7FA;
     --gray:#9AA3A8;
+    --amber:#B8791A;
+    --amber-tint:#FBF1DE;
   }
   *{box-sizing:border-box;}
   body{
@@ -536,6 +539,18 @@ PAGE_SHELL = """<!DOCTYPE html>
     color:var(--gray);font-weight:400;border-style:dashed;
   }
 
+  .card--repeat{
+    background:var(--amber-tint);
+    border-left-color:var(--amber);
+  }
+  .card__repeat-badge{
+    display:inline-flex;align-items:center;gap:4px;
+    font-family:'IBM Plex Mono',monospace;
+    font-size:10.5px;font-weight:500;
+    color:var(--amber);
+    width:fit-content;
+  }
+
   .empty{
     font-family:'IBM Plex Mono',monospace;
     font-size:13px;color:var(--gray);
@@ -652,6 +667,38 @@ function dateBucket(days){
   if(days <= 90) return '3m';
   return '3m+';
 }
+function flagRepeatPhones(){
+  var cutoff = new Date();
+  cutoff.setHours(0,0,0,0);
+  cutoff.setMonth(cutoff.getMonth() - 3);
+
+  var counts = {};
+  document.querySelectorAll('.card').forEach(function(card){
+    var phone = card.getAttribute('data-phone');
+    if(!phone) return;
+    var pub = card.getAttribute('data-published');
+    if(pub){
+      var d = new Date(pub + 'T00:00:00');
+      if(!isNaN(d.getTime()) && d < cutoff) return;
+    }
+    counts[phone] = (counts[phone] || 0) + 1;
+  });
+
+  document.querySelectorAll('.card').forEach(function(card){
+    var phone = card.getAttribute('data-phone');
+    if(phone && counts[phone] >= 2 && !card.classList.contains('card--repeat')){
+      card.classList.add('card--repeat');
+      var badge = document.createElement('span');
+      badge.className = 'card__repeat-badge';
+      badge.textContent = '🔁 ' + counts[phone] + ' зартай дугаар (3 сар)';
+      var phoneEl = card.querySelector('.card__phone');
+      if(phoneEl){ phoneEl.insertAdjacentElement('afterend', badge); }
+      else { card.appendChild(badge); }
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', flagRepeatPhones);
+
 function filterListings(){
   var loc = document.getElementById('locationFilter').value;
   var rooms = document.getElementById('roomsFilter').value;
