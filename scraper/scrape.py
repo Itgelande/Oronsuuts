@@ -361,8 +361,10 @@ def build_html_block(new_listings: list[dict]) -> str:
             '<path d="M7 17L17 7M9 7h8v8"/></svg></a>'
         )
 
+        pub_attr = escape(l["published"].split(" ")[0]) if l.get("published") else ""
+
         cards.append(
-            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}" data-price="{price_attr}">
+            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}" data-price="{price_attr}" data-published="{pub_attr}">
         {link_icon}
         <a class="card__title" href="{l["url"]}" target="_blank" rel="noopener">{title}</a>
         {specs_html}
@@ -616,6 +618,15 @@ PAGE_SHELL = """<!DOCTYPE html>
         <option value="500-1000">500 сая - 1 тэрбум</option>
         <option value="1000+">1 тэрбумаас дээш</option>
       </select>
+      <select id="dateFilter" onchange="filterListings()">
+        <option value="">Бүх огноо</option>
+        <option value="today">Өнөөдөр</option>
+        <option value="7d">Сүүлийн 7 хоног</option>
+        <option value="14d">Сүүлийн 14 хоног</option>
+        <option value="1m">Сүүлийн 1 сар</option>
+        <option value="3m">Сүүлийн 3 сар</option>
+        <option value="3m+">3 сараас дээш</option>
+      </select>
     </div>
   </div>
 </header>
@@ -624,15 +635,34 @@ PAGE_SHELL = """<!DOCTYPE html>
 </main>
 <footer>Хувийн хэрэглээнд зориулсан автомат хянагч</footer>
 <script>
+function daysAgo(dateStr){
+  if(!dateStr) return null;
+  var pub = new Date(dateStr + 'T00:00:00');
+  if(isNaN(pub.getTime())) return null;
+  var now = new Date();
+  now.setHours(0,0,0,0);
+  return Math.round((now - pub) / 86400000);
+}
+function dateBucket(days){
+  if(days === null) return '';
+  if(days <= 0) return 'today';
+  if(days <= 7) return '7d';
+  if(days <= 14) return '14d';
+  if(days <= 30) return '1m';
+  if(days <= 90) return '3m';
+  return '3m+';
+}
 function filterListings(){
   var loc = document.getElementById('locationFilter').value;
   var rooms = document.getElementById('roomsFilter').value;
   var price = document.getElementById('priceFilter').value;
+  var dateSel = document.getElementById('dateFilter').value;
   document.querySelectorAll('.card').forEach(function(card){
     var locMatch = !loc || card.getAttribute('data-location') === loc;
     var roomsMatch = !rooms || card.getAttribute('data-rooms') === rooms;
     var priceMatch = !price || card.getAttribute('data-price') === price;
-    card.style.display = (locMatch && roomsMatch && priceMatch) ? '' : 'none';
+    var dateMatch = !dateSel || dateBucket(daysAgo(card.getAttribute('data-published'))) === dateSel;
+    card.style.display = (locMatch && roomsMatch && priceMatch && dateMatch) ? '' : 'none';
   });
   document.querySelectorAll('.day').forEach(function(day){
     var cards = day.querySelectorAll('.card');
