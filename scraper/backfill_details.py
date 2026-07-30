@@ -28,15 +28,15 @@ MAX_BACKFILL = 400  # аюулгүйн хязгаар
 
 CARD_RE = re.compile(
     r'<div class="card" data-location="(?P<loc>[^"]*)" data-rooms="(?P<rooms>[^"]*)" '
-    r'data-price="(?P<pricebucket>[^"]*)"(?: data-published="[^"]*")?>\s*'
+    r'data-price="(?P<pricebucket>[^"]*)"(?: data-published="(?P<pub>[^"]*)")?>\s*'
     r'<a class="card__go"[^>]*>.*?</a>\s*'
     r'<a class="card__title" href="(?P<url>[^"]+)"[^>]*>(?P<title>[^<]*)</a>\s*'
-    r'(?:<span class="card__specs">[^<]*</span>\s*)?'
+    r'(?:<span class="card__specs">(?P<specs>[^<]*)</span>\s*)?'
     r'<div class="card__row">\s*'
     r'<span class="card__price">(?P<price>[^<]*)</span>\s*'
     r'<span class="card__loc">[^<]*</span>\s*'
     r'</div>\s*'
-    r'(?:<a class="card__phone" href="tel:[^"]*">[^<]*</a>|'
+    r'(?:<a class="card__phone" href="tel:(?P<phone>[^"]*)">[^<]*</a>|'
     r'<span class="card__phone[^"]*">[^<]*</span>)\s*'
     r'</div>',
     re.DOTALL,
@@ -109,6 +109,29 @@ import re as _re
 AD_ID_RE = _re.compile(r"/adv/(\d+)_")
 
 
+SPEC_AREA_RE = re.compile(r"([\d.]+\s*м²)")
+SPEC_FLOOR_RE = re.compile(r"(\d+)/(\d+)\s*давхар(?!тай)")
+SPEC_TOTAL_FLOORS_RE = re.compile(r"(\d+)\s*давхартай")
+
+
+def parse_existing_specs(specs_text: str | None) -> dict:
+    """Картан дээр аль хэдийн байгаа specs текстээс талбай/давхрын мэдээллийг сэргээнэ."""
+    existing: dict = {}
+    if not specs_text:
+        return existing
+    area_m = SPEC_AREA_RE.search(specs_text)
+    if area_m:
+        existing["area"] = area_m.group(1)
+    floor_m = SPEC_FLOOR_RE.search(specs_text)
+    if floor_m:
+        existing["floor"], existing["total_floors"] = floor_m.group(1), floor_m.group(2)
+    else:
+        tf_m = SPEC_TOTAL_FLOORS_RE.search(specs_text)
+        if tf_m:
+            existing["total_floors"] = tf_m.group(1)
+    return existing
+
+
 def main() -> None:
     html = OUTPUT_HTML.read_text(encoding="utf-8")
     seen = load_seen()
@@ -116,9 +139,9 @@ def main() -> None:
     matches = list(CARD_RE.finditer(html))
     print(f"Нийт олдсон карт: {len(matches)}")
 
-    # Аль хэдийн утастай (сая) картыг дахин татахгүй байх
-    todo = [m for m in matches if 'card__phone card__phone--missing' in m.group(0)]
-    print(f"Утасгүй карт (татах ёстой): {len(todo)}")
+    # Одоо зорилго: нийтлэгдсэн огноо дутуу картыг олж, дэлгэрэнгүй хуудаснаас нь татна
+    todo = [m for m in matches if not (m.group("pub") or "").strip()]
+    print(f"Огноогүй карт (татах ёстой): {len(todo)}")
 
     updated_html = html
     offset = 0
@@ -128,15 +151,25 @@ def main() -> None:
     for i, m in enumerate(todo[:MAX_BACKFILL]):
         url = m.group("url")
         print(f"[{i + 1}/{min(len(todo), MAX_BACKFILL)}] {url}")
+
+        # Одоо байгаа (алдахгүй хадгалах) мэдээллийг эхлээд бэлдэнэ
+        prev_details = parse_existing_specs(m.group("specs"))
+        if m.group("phone"):
+            prev_details["phone"] = m.group("phone")
+
         try:
-            details = fetch_detail(url)
+            fresh = fetch_detail(url)
         except Exception as e:  # noqa: BLE001
             print(f"  Алдаа: {e}")
-            details = {}
+            fresh = {}
             failed += 1
         else:
-            if details.get("phone"):
+            if fresh.get("published"):
                 success += 1
+
+        # Шинээр амжилттай татсан талбарууд хуучныг дарж бичнэ; амжилтгүй
+        # бол хуучин (аль хэдийн байсан) утга хэвээрээ үлдэнэ
+        details = {**prev_details, **fresh}
 
         id_m = AD_ID_RE.search(url)
         if id_m and details.get("published"):
@@ -160,7 +193,7 @@ def main() -> None:
 
     OUTPUT_HTML.write_text(updated_html, encoding="utf-8")
     save_seen(seen)
-    print(f"Утас олдсон: {success}, амжилтгүй: {failed}")
+    print(f"Огноо олдсон: {success}, амжилтгүй: {failed}")
     print("docs/index.html болон data/seen_ids.json шинэчлэгдлээ")
 
 
