@@ -759,13 +759,21 @@ def update_output_html(new_block: str) -> None:
 MAX_DETAIL_FETCHES = 300  # нэг ажиллагаанд дэлгэрэнгүй хуудас хэдэн зарын татах дээд хязгаар
 
 
+CONSECUTIVE_EMPTY_PAGES_TO_STOP = 3  # хэдэн дараалсан хуудсанд шинэ алга бол л зогсоох вэ
+
+
 def main() -> None:
     seen = load_seen()
     all_listings: list[dict] = []
     new_listings: list[dict] = []
+    consecutive_empty = 0
 
     # Сүүлд хадгалсан зараас хойш орсон бүх зарыг олох хүртэл хуудсаар үргэлжлүүлж татна.
-    # Хуудас бүрд шинэ зар олдохгүй болмогц зогсооно (MAX_PAGES хүртэл аюулгүйн хязгаартай).
+    # "Онцгой" (VIP) зарууд байнга дээшээ түлхэгддэг тул зарим хуудсанд түр зуур
+    # зөвхөн хуучин зар л гарч ирж болзошгүй. Иймд ганц хуудсанд шинэ алга гэдэг
+    # шалтгаанаар шууд зогсохгүй, ХЭДЭН ДАРААЛСАН хуудсанд шинэ алга байхыг шалгаж
+    # (CONSECUTIVE_EMPTY_PAGES_TO_STOP) улмаар цаана нь байж болзошгүй шинэ зарыг
+    # алдахгүй байхыг оролдоно.
     for page in range(1, MAX_PAGES + 1):
         try:
             html = fetch_page(page)
@@ -782,9 +790,16 @@ def main() -> None:
         print(f"Хуудас {page}: {len(page_listings)} зар, {len(page_new)} шинэ")
         time.sleep(REQUEST_DELAY_SEC)
 
-        if not page_new and page > 1:
-            # Энэ хуудсанд шинэ зар олдоогүй тул цаашид ч байхгүй гэж үзнэ
-            break
+        if page_new:
+            consecutive_empty = 0
+        else:
+            consecutive_empty += 1
+            if page > 1 and consecutive_empty >= CONSECUTIVE_EMPTY_PAGES_TO_STOP:
+                print(
+                    f"Дараалсан {CONSECUTIVE_EMPTY_PAGES_TO_STOP} хуудсанд шинэ "
+                    "зар олдоогүй тул зогсоно"
+                )
+                break
 
     # Улаанбаатар биш (аймгийн) зарыг эрт шүүж хасна — дэлгэрэнгүй хуудсыг ч
     # дэмий татахгүй байх зорилготой. location тодорхойгүй (None) зар цаашид
