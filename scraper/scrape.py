@@ -221,6 +221,13 @@ def build_html_block(new_listings: list[dict]) -> str:
         location = l.get("location") or "Бусад"
         loc_attr = escape(location)
 
+        rooms_val = l.get("rooms")
+        try:
+            rooms_num = int(rooms_val) if rooms_val else None
+        except ValueError:
+            rooms_num = None
+        rooms_attr = ("5+" if rooms_num and rooms_num >= 5 else str(rooms_num)) if rooms_num else ""
+
         spec_parts = []
         if l.get("area"):
             spec_parts.append(escape(l["area"]))
@@ -245,7 +252,7 @@ def build_html_block(new_listings: list[dict]) -> str:
             phone_html = '<span class="card__phone card__phone--missing">Утас олдсонгүй</span>'
 
         cards.append(
-            f'''      <div class="card" data-location="{loc_attr}">
+            f'''      <div class="card" data-location="{loc_attr}" data-rooms="{rooms_attr}">
         <a class="card__title" href="{l["url"]}" target="_blank" rel="noopener">{title}</a>
         {specs_html}
         <div class="card__row">
@@ -419,7 +426,8 @@ PAGE_SHELL = """<!DOCTYPE html>
     background:var(--white) url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="10" height="6"><path d="M0 0L5 6L10 0Z" fill="%23081C2D"/></svg>') no-repeat right 12px center;
     border:1px solid #D8DCDF;border-radius:8px;
     padding:9px 30px 9px 12px;
-    width:100%;
+    flex:1;
+    min-width:0;
   }
 
   footer{
@@ -459,12 +467,20 @@ PAGE_SHELL = """<!DOCTYPE html>
     <h1>Шинэ байр</h1>
     <p class="meta">Өдөр бүр автоматаар шалгаж, шинэ зарыг доор нэмнэ</p>
     <div class="filterbar">
-      <select id="locationFilter" onchange="filterByLocation(this.value)">
+      <select id="locationFilter" onchange="filterListings()">
         <option value="">Бүх дүүрэг</option>
         <option>Багануур</option><option>Багахангай</option><option>Баянгол</option>
         <option>Баянзүрх</option><option>Налайх</option><option>Сонгинохайрхан</option>
         <option>Сүхбаатар</option><option>Хан-Уул</option><option>Чингэлтэй</option>
         <option value="Бусад">Байршил тодорхойгүй</option>
+      </select>
+      <select id="roomsFilter" onchange="filterListings()">
+        <option value="">Бүх өрөө</option>
+        <option value="1">1 өрөө</option>
+        <option value="2">2 өрөө</option>
+        <option value="3">3 өрөө</option>
+        <option value="4">4 өрөө</option>
+        <option value="5+">5+ өрөө</option>
       </select>
     </div>
   </div>
@@ -474,14 +490,18 @@ PAGE_SHELL = """<!DOCTYPE html>
 </main>
 <footer>Хувийн хэрэглээнд зориулсан автомат хянагч</footer>
 <script>
-function filterByLocation(loc){
+function filterListings(){
+  var loc = document.getElementById('locationFilter').value;
+  var rooms = document.getElementById('roomsFilter').value;
   document.querySelectorAll('.card').forEach(function(card){
-    var match = !loc || card.getAttribute('data-location') === loc;
-    card.style.display = match ? '' : 'none';
+    var locMatch = !loc || card.getAttribute('data-location') === loc;
+    var roomsMatch = !rooms || card.getAttribute('data-rooms') === rooms;
+    card.style.display = (locMatch && roomsMatch) ? '' : 'none';
   });
   document.querySelectorAll('.day').forEach(function(day){
-    var visible = day.querySelectorAll('.card').length === 0 ||
-      Array.prototype.some.call(day.querySelectorAll('.card'), function(c){return c.style.display !== 'none';});
+    var cards = day.querySelectorAll('.card');
+    var visible = cards.length === 0 ||
+      Array.prototype.some.call(cards, function(c){return c.style.display !== 'none';});
     day.style.display = visible ? '' : 'none';
   });
 }
