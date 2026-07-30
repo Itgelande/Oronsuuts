@@ -19,7 +19,7 @@ import requests
 from bs4 import BeautifulSoup
 
 BASE_URL = "https://www.unegui.mn/l-hdlh/l-hdlh-zarna/oron-suuts-zarna/"
-MAX_PAGES = 20              # хамгийн ихдээ хэдэн хуудас шалгах вэ (аюулгүйн хязгаар)
+MAX_PAGES = 100             # хамгийн ихдээ хэдэн хуудас шалгах вэ (аюулгүйн хязгаар)
 REQUEST_DELAY_SEC = 2       # хуудас/зар хооронд түр хүлээх (сайтад дарамт өгөхгүй байх үүднээс)
 
 DATA_FILE = Path(__file__).resolve().parent.parent / "data" / "seen_ids.json"
